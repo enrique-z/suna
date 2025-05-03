@@ -143,7 +143,7 @@ class ContextManager:
         self, 
         thread_id: str, 
         messages: List[Dict[str, Any]], 
-        model: str = "gpt-4o-mini"
+        model: str = "ollama/deepseek-r1-32:custom"
     ) -> Optional[Dict[str, Any]]:
         """Generate a summary of conversation messages.
         

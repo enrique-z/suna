@@ -33,11 +33,16 @@ async def run_agent(
     thread_manager: Optional[ThreadManager] = None,
     native_max_auto_continues: int = 25,
     max_iterations: int = 150,
-    model_name: str = "anthropic/claude-3-7-sonnet-latest",
+    model_name: str = "ollama/deepseek-r1-32:custom",
     enable_thinking: Optional[bool] = False,
     reasoning_effort: Optional[str] = 'low',
     enable_context_manager: bool = True
 ):
+    # Validate the model name to prevent empty strings
+    if not model_name or model_name.strip() == "":
+        raise ValueError("No model name provided")
+    elif model_name == "ollama/":
+        raise ValueError("Incomplete Ollama model name: missing specific model after 'ollama/' prefix")
     """Run the development agent with specified configuration."""
     
     thread_manager = ThreadManager()

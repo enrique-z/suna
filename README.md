@@ -96,6 +96,32 @@ You'll need the following components:
 
 1. **Supabase**:
    - Create a new [Supabase project](https://supabase.com/dashboard/projects)
+
+### Using Local Ollama Models and Simplified Startup
+
+To use local Ollama models and simplify the project startup process, a utility script `start-suna.py` has been created in the root directory. This script allows you to select your preferred LLM model (including available Ollama models) and automatically starts the backend and frontend services.
+
+**Requirements:**
+
+-   Ollama installed and running on your system.
+-   For web search functionality, you'll need valid API keys for:
+    -   Tavily API key (for search capabilities)
+    -   Firecrawl API key (for web scraping capabilities)
+
+**How to Use:**
+
+1.  Ensure Ollama is running.
+2.  Open your terminal and navigate to the root directory of the project (`suna/`).
+3.  Run the script using the command: `python start-suna.py`
+4.  The script will detect your available Ollama models and present a list of options, including Anthropic Sonnet 3.7, Perplexity Sonar Pro, and your Ollama models.
+5.  Enter the number corresponding to the model you want to set as the default for both the main agent and summarization.
+6.  The script will update the necessary backend configuration files and then automatically start the backend and frontend services.
+7.  Access Suna in your browser at `http://localhost:3000`.
+8.  Press `Ctrl+C` in the terminal where the script is running to stop both processes.
+
+**Note:** If your Ollama instance is running on a different address than the default (`http://localhost:11434`), you can configure the `OLLAMA_API_BASE` environment variable in your `backend/.env` file.
+
+### Installation Steps
    - Save your project's API URL, anon key, and service role key for later use
    - Install the [Supabase CLI](https://supabase.com/docs/guides/cli/getting-started)
 
@@ -109,6 +135,11 @@ You'll need the following components:
      - If you're using our Docker Compose setup, Redis is included and configured automatically
      - No additional installation is needed
    - Save your Redis connection details for later use (not needed if using Docker Compose)
+
+### Utility Scripts
+
+- **Start Suna**: The `start-suna.py` script in the root directory is the primary way to start the Suna application. It allows you to select your LLM model and automatically starts the backend and frontend. See the "Using Local Ollama Models and Simplified Startup" section for details.
+- **Analyze Log Costs**: The `analyze_logs_cost.py` script in the root directory can be used to analyze the backend log files (`backend/logs/`) and estimate the total LLM tokens used and the associated cost. This script is automatically run when you stop the `start-suna.py` script with `Ctrl+C`. You can also run it manually from the terminal using `python analyze_logs_cost.py`. The report will be saved as a timestamped log file in the `backend/logs/` directory.
 
 3. **Daytona**:
    - Create an account on [Daytona](https://app.daytona.io/)
@@ -227,17 +258,16 @@ pip install -r requirements.txt
 
 6. **Start the application**:
 
-   In one terminal, start the frontend:
+   Open your terminal and navigate to the root directory of the project (`suna/`).
+   Run the `start-suna.py` script using the command:
 ```bash
-cd frontend
-npm run dev
+python start-suna.py
 ```
+   This script will guide you through selecting your LLM model and will automatically start both the backend and frontend services.
 
-   In another terminal, start the backend:
-```bash
-cd backend
-python api.py
-```
+   Access Suna in your browser at `http://localhost:3000`.
+
+   To stop the application, press `Ctrl+C` in the terminal where the script is running.
 
 5-6. **Docker Compose Alternative**:
 
@@ -293,4 +323,3 @@ The Docker Compose setup includes a Redis service that will be used by the backe
 ## License
 
 Kortix Suna is licensed under the Apache License, Version 2.0. See [LICENSE](./LICENSE) for the full license text.
-

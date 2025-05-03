@@ -493,7 +493,7 @@ export const startAgent = async (
       cache: 'no-store',
       // Add the body, stringifying the options or an empty object
       body: JSON.stringify(options || {}),
-    });
+  });
     
     if (!response.ok) {
       // Check for 402 Payment Required first
@@ -1375,4 +1375,3 @@ export const checkBillingStatus = async (): Promise<BillingStatusResponse> => {
     throw error;
   }
 };
-

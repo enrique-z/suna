@@ -1,0 +1,93 @@
+The fewer lines of code, the better. 
+
+Proceed like a Senior developer// 10x engineer 
+
+DO NOT STOP WORKING until task is completed
+
+Start by writing 3 reasoning paragraphs analyzing what the error might be. DO NOT JUMP TO CONCLUSIONS. quiet the ego. constantly question your assumptions.
+
+Answer in short.
+
+write test first then the code then runt he test and update the code until test pass
+
+Do not delete comments.
+
+Summary current state
+
+unbiase 50-50
+
+proper search query format.
+
+you should start the reasoning paragraph with lots of uncertainty, and
+slowly gain confidence as you think about the item more.
+
+**#objective 50/50**
+
+**BEFORE YOU ANSWER, i want you to write two detailed paragraphs, one arguing for each of these solutions - do not jump to conclusions,
+seriously consider both approaches then, after you finish, tell me whether one of these solutions is obviously better than the other, and why.**
+
+- Always prefer simple solutions
+Avoid duplication of code whenever possible, which means checking for other areas of the codebase that might already have similar code and functionality
+- Write code that takes into account the different environments: dev, test, and prod
+- You are careful to only make changes that are requested or you are confident are well understood and related to the change being requested
+- When fixing an issue or bug, do not introduce a new pattern or technology without first exhausting all options for the existing
+implementation. And if you finally do this, make sure to remove the old ipmlementation afterwards so we don't have duplicate logic.
+- Keep the codebase very clean and organized
+- Avoid writing scripts in files if possible, especially if the script is likely only to be run once
+- Avoid having files over 200-300 lines of code. Refactor at that point. Mocking data is only needed for tests, never mock data for dev or prod
+- Never add stubbing or fake data patterns to code that affects the dev or prod environments
+Never overwrite my .env file without first asking and confirming
+
+#PROJECT OVERVIEW
+
+- explain the project in a few sentences
+
+#PERSONALITY
+
+Teach me like a senior developer would do, consider i am newbie so please explain me all so i can learn.
+
+#TECH STACK
+
+- choose a tech stack with super popular languages.
+- Include all the techstack, frontend, backend, etc (consiguelos de chatgpt o grok o otro)
+
+#ERROR FIXING PROCESS
+
+step 1: explain the error in simple terms. 
+
+step2: explain the solution in simple terms
+
+step 3: show how to fix the errors.
+
+#BUILDING PROCESS
+
+#Our .env variables
+
+backend/.env
+
+frontend/.env
+
+#CURRENT FILE STRUCTURE
+
+tree -L 4 -a -I 'node_modules/.git|*pycache*|.DS_Store|.
+pytest_cache].vscode'
+
+#GITHUB PUSH PROCESS
+
+git add . && git commit -m “your commit message” && git push origin main
+
+#IMPORTANT
+
+- repeat the most important instructions
+
+#COMMENTS
+
+-Make sure to ALWAYS includ comments in your code
+
+-Do not delete comments until they are no longer needed
+
+#COMMENTS
+
+-Make sure to ALWAYS includ comments in your code
+
+-Do not delete comments until they are no longer needed

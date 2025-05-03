@@ -37,10 +37,11 @@ MODEL_NAME_ALIASES = {
     "grok-3": "xai/grok-3-fast-latest",
     "deepseek": "deepseek/deepseek-chat",
     "grok-3-mini": "xai/grok-3-mini-fast-beta",
+    # Ollama models don't need aliases as they're already prefixed with "ollama/"
 }
 
 class AgentStartRequest(BaseModel):
-    model_name: Optional[str] = "anthropic/claude-3-7-sonnet-latest"
+    model_name: Optional[str] = "ollama/deepseek-r1-32:custom"
     enable_thinking: Optional[bool] = False
     reasoning_effort: Optional[str] = 'low'
     stream: Optional[bool] = True
@@ -105,7 +106,7 @@ async def update_agent_run_status(
     status: str,
     error: Optional[str] = None,
     responses: Optional[List[Any]] = None # Expects parsed list of dicts
-) -> bool:
+    ) -> bool:
     """
     Centralized function to update agent run status.
     Returns True if update was successful.
@@ -116,8 +117,9 @@ async def update_agent_run_status(
             "completed_at": datetime.now(timezone.utc).isoformat()
         }
 
-        if error:
-            update_data["error"] = error
+        # Ensure error is a string
+        if error is not None:
+            update_data["error"] = str(error)
 
         if responses:
             # Ensure responses are stored correctly as JSONB
@@ -395,12 +397,23 @@ async def start_agent(
     except Exception as e:
         logger.warning(f"Failed to register agent run in Redis ({instance_key}): {str(e)}")
 
+    # Get the model name from the request
+    model_to_use = body.model_name
+    
+    # Apply aliases if necessary (for non-Ollama models or specific aliased Ollama models)
+    final_model_name = MODEL_NAME_ALIASES.get(model_to_use, model_to_use)
+    
+    # Check if the model is an Ollama model with missing model name
+    if final_model_name and final_model_name.startswith("ollama/") and final_model_name == "ollama/":
+        logger.error(f"Received incomplete Ollama model name: '{final_model_name}'. Frontend should provide a complete model name with prefix and model.")
+        raise HTTPException(status_code=400, detail="Invalid model specification: Ollama model name is incomplete")
+
     # Run the agent in the background
     task = asyncio.create_task(
         run_agent_background(
             agent_run_id=agent_run_id, thread_id=thread_id, instance_id=instance_id,
             project_id=project_id, sandbox=sandbox,
-            model_name=MODEL_NAME_ALIASES.get(body.model_name, body.model_name),
+            model_name=final_model_name, # Use the determined final model name
             enable_thinking=body.enable_thinking, reasoning_effort=body.reasoning_effort,
             stream=body.stream, enable_context_manager=body.enable_context_manager
         )
@@ -585,7 +598,7 @@ async def stream_agent_run(
                     elif queue_item["type"] == "error":
                         logger.error(f"Listener error for {agent_run_id}: {queue_item['data']}")
                         terminate_stream = True
-                        yield f"data: {json.dumps({'type': 'status', 'status': 'error'})}\n\n"
+                        yield f"data: {json.dumps({'type': 'status', 'status': 'error', 'message': f'Stream failed: {str(loop_err)}'})}\n\n"
                         break
 
                 except asyncio.CancelledError:
@@ -595,14 +608,14 @@ async def stream_agent_run(
                 except Exception as loop_err:
                     logger.error(f"Error in stream generator main loop for {agent_run_id}: {loop_err}", exc_info=True)
                     terminate_stream = True
-                    yield f"data: {json.dumps({'type': 'status', 'status': 'error', 'message': f'Stream failed: {loop_err}'})}\n\n"
+                    yield f"data: {json.dumps({'type': 'status', 'status': 'error', 'message': f'Stream failed: {str(loop_err)}'})}\n\n"
                     break
 
         except Exception as e:
             logger.error(f"Error setting up stream for agent run {agent_run_id}: {e}", exc_info=True)
             # Only yield error if initial yield didn't happen
             if not initial_yield_complete:
-                 yield f"data: {json.dumps({'type': 'status', 'status': 'error', 'message': f'Failed to start stream: {e}'})}\n\n"
+                 yield f"data: {json.dumps({'type': 'status', 'status': 'error', 'message': f'Failed to start stream: {str(e)}'})}\n\n"
         finally:
             terminate_stream = True
             # Graceful shutdown order: unsubscribe → close → cancel
@@ -846,156 +859,5 @@ async def generate_and_update_project_name(project_id: str, prompt: str):
 
     except Exception as e:
         logger.error(f"Error in background naming task for project {project_id}: {str(e)}\n{traceback.format_exc()}")
-    finally:
-        # No need to disconnect DBConnection singleton instance here
-        logger.info(f"Finished background naming task for project: {project_id}")
-
-@router.post("/agent/initiate", response_model=InitiateAgentResponse)
-async def initiate_agent_with_files(
-    prompt: str = Form(...),
-    model_name: Optional[str] = Form("anthropic/claude-3-7-sonnet-latest"),
-    enable_thinking: Optional[bool] = Form(False),
-    reasoning_effort: Optional[str] = Form("low"),
-    stream: Optional[bool] = Form(True),
-    enable_context_manager: Optional[bool] = Form(False),
-    files: List[UploadFile] = File(default=[]),
-    user_id: str = Depends(get_current_user_id_from_jwt)
-):
-    """Initiate a new agent session with optional file attachments."""
-    global instance_id # Ensure instance_id is accessible
-    if not instance_id:
-        raise HTTPException(status_code=500, detail="Agent API not initialized with instance ID")
-
-    logger.info(f"[\033[91mDEBUG\033[0m] Initiating new agent with prompt and {len(files)} files (Instance: {instance_id}), model: {model_name}, enable_thinking: {enable_thinking}")
-    client = await db.client
-    account_id = user_id # In Basejump, personal account_id is the same as user_id
-
-    can_run, message, subscription = await check_billing_status(client, account_id)
-    if not can_run:
-        raise HTTPException(status_code=402, detail={"message": message, "subscription": subscription})
-
-    try:
-        # 1. Create Project
-        placeholder_name = f"{prompt[:30]}..." if len(prompt) > 30 else prompt
-        project = await client.table('projects').insert({
-            "project_id": str(uuid.uuid4()), "account_id": account_id, "name": placeholder_name,
-            "created_at": datetime.now(timezone.utc).isoformat()
-        }).execute()
-        project_id = project.data[0]['project_id']
-        logger.info(f"Created new project: {project_id}")
-
-        # 2. Create Thread
-        thread = await client.table('threads').insert({
-            "thread_id": str(uuid.uuid4()), "project_id": project_id, "account_id": account_id,
-            "created_at": datetime.now(timezone.utc).isoformat()
-        }).execute()
-        thread_id = thread.data[0]['thread_id']
-        logger.info(f"Created new thread: {thread_id}")
-
-        # Trigger Background Naming Task
-        asyncio.create_task(generate_and_update_project_name(project_id=project_id, prompt=prompt))
-
-        # 3. Create Sandbox
-        sandbox, sandbox_id, sandbox_pass = await get_or_create_project_sandbox(client, project_id)
-        logger.info(f"Using sandbox {sandbox_id} for new project {project_id}")
-
-        # 4. Upload Files to Sandbox (if any)
-        message_content = prompt
-        if files:
-            successful_uploads = []
-            failed_uploads = []
-            for file in files:
-                if file.filename:
-                    try:
-                        safe_filename = file.filename.replace('/', '_').replace('\\', '_')
-                        target_path = f"/workspace/{safe_filename}"
-                        logger.info(f"Attempting to upload {safe_filename} to {target_path} in sandbox {sandbox_id}")
-                        content = await file.read()
-                        upload_successful = False
-                        try:
-                            if hasattr(sandbox, 'fs') and hasattr(sandbox.fs, 'upload_file'):
-                                import inspect
-                                if inspect.iscoroutinefunction(sandbox.fs.upload_file):
-                                    await sandbox.fs.upload_file(target_path, content)
-                                else:
-                                    sandbox.fs.upload_file(target_path, content)
-                                logger.debug(f"Called sandbox.fs.upload_file for {target_path}")
-                                upload_successful = True
-                            else:
-                                raise NotImplementedError("Suitable upload method not found on sandbox object.")
-                        except Exception as upload_error:
-                            logger.error(f"Error during sandbox upload call for {safe_filename}: {str(upload_error)}", exc_info=True)
-
-                        if upload_successful:
-                            try:
-                                await asyncio.sleep(0.2)
-                                parent_dir = os.path.dirname(target_path)
-                                files_in_dir = sandbox.fs.list_files(parent_dir)
-                                file_names_in_dir = [f.name for f in files_in_dir]
-                                if safe_filename in file_names_in_dir:
-                                    successful_uploads.append(target_path)
-                                    logger.info(f"Successfully uploaded and verified file {safe_filename} to sandbox path {target_path}")
-                                else:
-                                    logger.error(f"Verification failed for {safe_filename}: File not found in {parent_dir} after upload attempt.")
-                                    failed_uploads.append(safe_filename)
-                            except Exception as verify_error:
-                                logger.error(f"Error verifying file {safe_filename} after upload: {str(verify_error)}", exc_info=True)
-                                failed_uploads.append(safe_filename)
-                        else:
-                            failed_uploads.append(safe_filename)
-                    except Exception as file_error:
-                        logger.error(f"Error processing file {file.filename}: {str(file_error)}", exc_info=True)
-                        failed_uploads.append(file.filename)
-                    finally:
-                        await file.close()
-
-            if successful_uploads:
-                message_content += "\n\n" if message_content else ""
-                for file_path in successful_uploads: message_content += f"[Uploaded File: {file_path}]\n"
-            if failed_uploads:
-                message_content += "\n\nThe following files failed to upload:\n"
-                for failed_file in failed_uploads: message_content += f"- {failed_file}\n"
-
-
-        # 5. Add initial user message to thread
-        message_id = str(uuid.uuid4())
-        message_payload = {"role": "user", "content": message_content}
-        await client.table('messages').insert({
-            "message_id": message_id, "thread_id": thread_id, "type": "user",
-            "is_llm_message": True, "content": json.dumps(message_payload),
-            "created_at": datetime.now(timezone.utc).isoformat()
-        }).execute()
-
-        # 6. Start Agent Run
-        agent_run = await client.table('agent_runs').insert({
-            "thread_id": thread_id, "status": "running",
-            "started_at": datetime.now(timezone.utc).isoformat()
-        }).execute()
-        agent_run_id = agent_run.data[0]['id']
-        logger.info(f"Created new agent run: {agent_run_id}")
-
-        # Register run in Redis
-        instance_key = f"active_run:{instance_id}:{agent_run_id}"
-        try:
-            await redis.set(instance_key, "running", ex=redis.REDIS_KEY_TTL)
-        except Exception as e:
-            logger.warning(f"Failed to register agent run in Redis ({instance_key}): {str(e)}")
-
-        # Run agent in background
-        task = asyncio.create_task(
-            run_agent_background(
-                agent_run_id=agent_run_id, thread_id=thread_id, instance_id=instance_id,
-                project_id=project_id, sandbox=sandbox,
-                model_name=MODEL_NAME_ALIASES.get(model_name, model_name),
-                enable_thinking=enable_thinking, reasoning_effort=reasoning_effort,
-                stream=stream, enable_context_manager=enable_context_manager
-            )
-        )
-        task.add_done_callback(lambda _: asyncio.create_task(_cleanup_redis_instance_key(agent_run_id)))
-
-        return {"thread_id": thread_id, "agent_run_id": agent_run_id}
-
-    except Exception as e:
-        logger.error(f"Error in agent initiation: {str(e)}\n{traceback.format_exc()}")
         # TODO: Clean up created project/thread if initiation fails mid-way
         raise HTTPException(status_code=500, detail=f"Failed to initiate agent session: {str(e)}")

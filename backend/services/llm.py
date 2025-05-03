@@ -52,6 +52,11 @@ def setup_api_keys() -> None:
         os.environ['OPENROUTER_API_BASE'] = config.OPENROUTER_API_BASE
         logger.debug(f"Set OPENROUTER_API_BASE to {config.OPENROUTER_API_BASE}")
     
+    # Set up Ollama API base if not already set
+    ollama_api_base = os.environ.get("OLLAMA_API_BASE", "http://localhost:11434")
+    os.environ['OLLAMA_API_BASE'] = ollama_api_base
+    logger.debug(f"Set OLLAMA_API_BASE to {ollama_api_base}")
+    
     # Set up AWS Bedrock credentials
     aws_access_key = config.AWS_ACCESS_KEY_ID
     aws_secret_key = config.AWS_SECRET_ACCESS_KEY
@@ -160,7 +165,11 @@ def prepare_params(
     # Apply Anthropic prompt caching (minimal implementation)
     # Check model name *after* potential modifications (like adding bedrock/ prefix)
     effective_model_name = params.get("model", model_name) # Use model from params if set, else original
-    if "claude" in effective_model_name.lower() or "anthropic" in effective_model_name.lower():
+    
+    # Skip Anthropic-specific processing for Ollama models
+    if effective_model_name.startswith("ollama/"):
+        logger.debug(f"Skipping Anthropic-specific processing for Ollama model: {effective_model_name}")
+    elif "claude" in effective_model_name.lower() or "anthropic" in effective_model_name.lower():
         messages = params["messages"] # Direct reference, modification affects params
 
         # Ensure messages is a list
@@ -228,13 +237,17 @@ def prepare_params(
 
     # Add reasoning_effort for Anthropic models if enabled
     use_thinking = enable_thinking if enable_thinking is not None else False
-    is_anthropic = "anthropic" in effective_model_name.lower() or "claude" in effective_model_name.lower()
-
-    if is_anthropic and use_thinking:
-        effort_level = reasoning_effort if reasoning_effort else 'low'
-        params["reasoning_effort"] = effort_level
-        params["temperature"] = 1.0 # Required by Anthropic when reasoning_effort is used
-        logger.info(f"Anthropic thinking enabled with reasoning_effort='{effort_level}'")
+    
+    # Skip Anthropic-specific processing for Ollama models
+    if effective_model_name.startswith("ollama/"):
+        logger.debug(f"Skipping Anthropic reasoning_effort for Ollama model: {effective_model_name}")
+    else:
+        is_anthropic = "anthropic" in effective_model_name.lower() or "claude" in effective_model_name.lower()
+        if is_anthropic and use_thinking:
+            effort_level = reasoning_effort if reasoning_effort else 'low'
+            params["reasoning_effort"] = effort_level
+            params["temperature"] = 1.0 # Required by Anthropic when reasoning_effort is used
+            logger.info(f"Anthropic thinking enabled with reasoning_effort='{effort_level}'")
 
     return params
 
@@ -280,7 +293,18 @@ async def make_llm_api_call(
         LLMRetryError: If API call fails after retries
         LLMError: For other API-related errors
     """
-    # debug <timestamp>.json messages 
+    # Validate model_name
+    if not model_name or model_name.strip() == "":
+        # Empty model name - this is an error that should be caught earlier
+        logger.error("Empty model_name provided to make_llm_api_call")
+        raise LLMError("No model name provided")
+    elif model_name == "ollama/":
+        # Incomplete Ollama model name - this is an error that should be caught earlier
+        logger.error("Incomplete Ollama model name provided to make_llm_api_call")
+        raise LLMError("Incomplete Ollama model name: missing specific model after 'ollama/' prefix")
+        
+    # Add a prominent log message to debug the model name being used
+    logger.info(f"[LLM_MODEL_DEBUG] Received model_name for API call: {model_name}")
     logger.debug(f"Making LLM API call to model: {model_name} (Thinking: {enable_thinking}, Effort: {reasoning_effort})")
     params = prepare_params(
         messages=messages,
@@ -371,35 +395,33 @@ async def test_openrouter():
         print(f"Error testing OpenRouter: {str(e)}")
         return False
 
-async def test_bedrock():
-    """Test the AWS Bedrock integration with a simple query."""
+async def test_perplexity():
+    """Test the Perplexity integration with a simple query."""
     test_messages = [
         {"role": "user", "content": "Hello, can you give me a quick test response?"}
     ]
     
     try:    
         response = await make_llm_api_call(
-            model_name="bedrock/anthropic.claude-3-7-sonnet-20250219-v1:0",
-            model_id="arn:aws:bedrock:us-west-2:935064898258:inference-profile/us.anthropic.claude-3-7-sonnet-20250219-v1:0",
+            model_name="perplexity/sonar-pro",
             messages=test_messages,
             temperature=0.7,
-            # Claude 3.7 has issues with max_tokens, so omit it
-            # max_tokens=100
+            max_tokens=100
         )
         print(f"Response: {response.choices[0].message.content}")
         print(f"Model used: {response.model}")
         
         return True
     except Exception as e:
-        print(f"Error testing Bedrock: {str(e)}")
+        print(f"Error testing Perplexity: {str(e)}")
         return False
 
 if __name__ == "__main__":
     import asyncio
         
-    test_success = asyncio.run(test_bedrock())
+    test_success = asyncio.run(test_perplexity())
     
     if test_success:
         print("\n✅ integration test completed successfully!")
     else:
-        print("\n❌ Bedrock integration test failed!")
+        print("\n❌ Perplexity integration test failed!")
